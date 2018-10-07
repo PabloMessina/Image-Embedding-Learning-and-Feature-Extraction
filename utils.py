@@ -80,3 +80,37 @@ def process_image_batch(
     batch_X = preprocess_input_fn(batch_X)
     for model, featmat in zip(models, featmats):
         featmat[i_start:i_end] = model.predict(batch_X)
+        
+def get_image(image_cache, _id):
+    try:
+        return image_cache[_id]
+    except KeyError:
+        from PIL import Image
+        img = Image.open('/mnt/workspace/Ugallery/images/%d.jpg' % _id)
+        image_cache[_id] = img
+        return img
+
+def plot_images(plt, image_cache, ids):    
+    plt.close()
+    n = len(ids)    
+    nrows = n//5 + int(n%5>0)
+    ncols = min(n, 5)
+    plt.figure(1, (20, 5 * nrows))
+    for i, _id in enumerate(ids):
+        ax = plt.subplot(nrows, ncols, i+1)
+        ax.set_yticklabels([])
+        ax.set_xticklabels([])
+        img = get_image(image_cache, _id)
+        ax.set_title('%d) id = %d' % (i, _id))
+        ax.imshow(img, interpolation="nearest")
+    plt.show()
+    
+def load_embeddings_and_ids(dirpath, embedding_file, ids_file):
+    import numpy as np
+    from os import path
+    embeddings = np.load(path.join(dirpath, embedding_file))
+    with open(path.join(dirpath, ids_file)) as f:
+        ids = [int(x) for x in f.readlines()]
+        id2index = { _id:i for i,_id in enumerate(ids) }    
+    assert (embeddings.shape[0] == len(ids))
+    return embeddings, ids, id2index
