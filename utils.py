@@ -114,3 +114,73 @@ def load_embeddings_and_ids(dirpath, embedding_file, ids_file):
         id2index = { _id:i for i,_id in enumerate(ids) }    
     assert (embeddings.shape[0] == len(ids))
     return embeddings, ids, id2index
+
+
+class User:
+    def __init__(self, uid):
+        self._uid = uid
+        self.artwork_ids = []
+        self.artwork_idxs = []
+        self.artwork_idxs_set = set()
+        self.timestamps = []
+        self.artist_ids_set = set()
+        
+    def clear(self):
+        self.artwork_ids.clear()
+        self.artwork_idxs.clear()
+        self.artwork_idxs_set.clear()        
+        self.artist_ids_set.clear()
+        self.timestamps.clear()
+        
+    def append_transaction(self, artwork_id, timestamp, artwork_id2index, artist_ids):
+        aidx = artwork_id2index[artwork_id]
+        self.artwork_ids.append(artwork_id)
+        self.artwork_idxs.append(aidx)
+        self.artwork_idxs_set.add(aidx)
+        self.artist_ids_set.add(artist_ids[aidx])
+        self.timestamps.append(timestamp)
+    
+    def remove_last_nonfirst_purchase_basket(self, artwork_id2index, artist_ids):
+        baskets = self.baskets
+        if len(baskets) >= 2:
+            last_b = baskets.pop()            
+            artwork_ids = self.artwork_ids[:last_b[0]]
+            timestamps = self.timestamps[:last_b[0]]
+            self.clear()
+            for aid, t in zip(artwork_ids, timestamps):
+                self.append_transaction(aid, t, artwork_id2index, artist_ids)
+        
+    def build_purchase_baskets(self):
+        baskets = []
+        prev_t = None
+        offset = 0
+        count = 0
+        for i, t in enumerate(self.timestamps):
+            if t != prev_t:
+                if prev_t is not None:
+                    baskets.append((offset, count))
+                    offset = i
+                count = 1
+            else:
+                count += 1
+            prev_t = t
+        baskets.append((offset, count))
+        self.baskets = baskets
+        
+    def sanity_check_purchase_baskets(self):
+        ids = self.artwork_ids
+        ts = self.timestamps
+        baskets = self.baskets        
+        n = len(ts)
+        assert(len(ids) == len(ts))
+        assert(len(baskets) > 0)
+        assert (n > 0)
+        for b in baskets:
+            for j in range(b[0], b[0] + b[1] - 1):
+                assert(ts[j] == ts[j+1])
+        for i in range(1, len(baskets)):
+            b1 = baskets[i-1]
+            b2 = baskets[i]
+            assert(b1[0] + b1[1] == b2[0])
+        assert(baskets[0][0] == 0)
+        assert(baskets[-1][0] + baskets[-1][1] == n)
