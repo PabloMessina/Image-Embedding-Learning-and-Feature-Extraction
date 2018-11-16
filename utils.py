@@ -142,13 +142,15 @@ class User:
     
     def remove_last_nonfirst_purchase_basket(self, artwork_id2index, artist_ids):
         baskets = self.baskets
-        if len(baskets) >= 2:
-            last_b = baskets.pop()            
+        len_before = len(baskets)
+        if len_before >= 2:
+            last_b = baskets.pop()
             artwork_ids = self.artwork_ids[:last_b[0]]
             timestamps = self.timestamps[:last_b[0]]
             self.clear()
             for aid, t in zip(artwork_ids, timestamps):
                 self.append_transaction(aid, t, artwork_id2index, artist_ids)
+            assert len(self.baskets) == len_before - 1
         
     def build_purchase_baskets(self):
         baskets = []

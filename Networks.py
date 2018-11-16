@@ -17,7 +17,81 @@ class TrainLogger:
                         n_train_tuples, n_validation_tuples, elapsed_seconds, batch_size, learning_rate,
                         model_updated))
 
-class ContentBasedLearn2RankNetwork:
+class ContentBasedLearn2RankNetwork_Base:
+    @staticmethod
+    def compute_user_vector(profile_items_average, user_model_mode):
+        if user_model_mode == 'BIGGER':
+            # user hidden layer 1
+            user_hidden_1 = tf.layers.dense(
+                inputs=profile_items_average,
+                units=256,
+                activation=tf.nn.selu,
+                name='user_hidden_1'
+            )
+            # user hidden layer 2
+            user_hidden_2 = tf.layers.dense(
+                inputs=user_hidden_1,
+                units=256,
+                activation=tf.nn.selu,
+                name='user_hidden_2'
+            )
+            # user final vector
+            return tf.layers.dense(
+                inputs=user_hidden_2,
+                units=128,
+                activation=tf.nn.selu,
+                name='user_vector'
+            )
+        if user_model_mode == 'BIG':
+            # user hidden layer
+            user_hidden = tf.layers.dense(
+                inputs=profile_items_average,
+                units=256,
+                activation=tf.nn.selu,
+                name='user_hidden'
+            )
+            # user final vector
+            return tf.layers.dense(
+                inputs=user_hidden,
+                units=128,
+                activation=tf.nn.selu,
+                name='user_vector'
+            )
+        if user_model_mode == 'DEFAULT':
+            # user hidden layer
+            user_hidden = tf.layers.dense(
+                inputs=profile_items_average,
+                units=128,
+                activation=tf.nn.selu,
+                name='user_hidden'
+            )
+            # user final vector
+            user_vector = tf.layers.dense(
+                inputs=user_hidden,
+                units=128,
+                activation=tf.nn.selu,
+                name='user_vector'
+            )
+        assert False
+    
+    @staticmethod
+    def trainable_item_embedding(X):
+        with tf.variable_scope("trainable_item_embedding", reuse=tf.AUTO_REUSE):
+            fc1 = tf.layers.dense( # None -> 256
+                inputs=X,
+                units=256,
+                activation=tf.nn.selu,
+                name='fc1'
+            )
+            fc2 = tf.layers.dense( # 256 -> 128
+                inputs=fc1,
+                units=128,
+                activation=tf.nn.selu,
+                name='fc2'
+            )
+            return fc2
+
+class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
     def __init__(self, user_model_mode='DEFAULT'):
         
         # --- placeholders
@@ -43,60 +117,9 @@ class ContentBasedLearn2RankNetwork:
         self._profile_items_average =\
             tf.reduce_sum(self._masked_profile_item_embeddings, axis=1) /\
             tf.reshape(self._profile_sizes, [-1, 1])
-            
-        if user_model_mode == 'BIGGER':
-            # user hidden layer 1
-            self._user_hidden_1 = tf.layers.dense(
-                inputs=self._profile_items_average,
-                units=256,
-                activation=tf.nn.selu,
-                name='user_hidden_1'
-            )
-            # user hidden layer 2
-            self._user_hidden_2 = tf.layers.dense(
-                inputs=self._user_hidden_1,
-                units=256,
-                activation=tf.nn.selu,
-                name='user_hidden_2'
-            )
-            # user final vector
-            self._user_vector = tf.layers.dense(
-                inputs=self._user_hidden_2,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_vector'
-            )
-        elif user_model_mode == 'BIG':
-            # user hidden layer
-            self._user_hidden = tf.layers.dense(
-                inputs=self._profile_items_average,
-                units=256,
-                activation=tf.nn.selu,
-                name='user_hidden'
-            )
-            # user final vector
-            self._user_vector = tf.layers.dense(
-                inputs=self._user_hidden,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_vector'
-            )
-        elif user_model_mode == 'DEFAULT':
-            # user hidden layer
-            self._user_hidden = tf.layers.dense(
-                inputs=self._profile_items_average,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_hidden'
-            )
-            # user final vector
-            self._user_vector = tf.layers.dense(
-                inputs=self._user_hidden,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_vector'
-            )
-        else: assert False
+        
+        # user vector
+        self._user_vector = self.compute_user_vector(self._profile_items_average, user_model_mode)
         
         # ---- positive item vector
         tmp = tf.gather(self._pretrained_embeddings, self._positive_item_index)
@@ -121,23 +144,6 @@ class ContentBasedLearn2RankNetwork:
         
         # --- optimizer
         self._optimizer = tf.train.AdamOptimizer(self._learning_rate).minimize(self._train_loss)
-        
-    @staticmethod
-    def trainable_item_embedding(X):
-        with tf.variable_scope("trainable_item_embedding", reuse=tf.AUTO_REUSE):
-            fc1 = tf.layers.dense( # None -> 256
-                inputs=X,
-                units=256,
-                activation=tf.nn.selu,
-                name='fc1'
-            )
-            fc2 = tf.layers.dense( # 256 -> 128
-                inputs=fc1,
-                units=128,
-                activation=tf.nn.selu,
-                name='fc2'
-            )
-            return fc2
     
     def optimize_and_get_train_loss(self, sess, learning_rate, pretrained_embeddings,
                                     profile_item_indexes, profile_sizes,
@@ -147,17 +153,6 @@ class ContentBasedLearn2RankNetwork:
             self._train_loss,
         ], feed_dict={
             self._learning_rate: learning_rate,
-            self._pretrained_embeddings: pretrained_embeddings,
-            self._profile_item_indexes: profile_item_indexes,
-            self._profile_sizes: profile_sizes,
-            self._positive_item_index: positive_item_index,
-            self._negative_item_index: negative_item_index,
-        })
-    
-    def get_train_loss(self, sess, pretrained_embeddings, profile_item_indexes, profile_sizes,
-             positive_item_index, negative_item_index):
-        return sess.run(
-            self._train_loss, feed_dict={
             self._pretrained_embeddings: pretrained_embeddings,
             self._profile_item_indexes: profile_item_indexes,
             self._profile_sizes: profile_sizes,
@@ -176,85 +171,457 @@ class ContentBasedLearn2RankNetwork:
             self._negative_item_index: negative_item_index,
         })
 
-class ContentBasedLearn2RankNetwork_Evaluation:
+class ContentBasedLearn2RankNetwork_Precomputation(ContentBasedLearn2RankNetwork_Base):
     def __init__(self, user_model_mode='DEFAULT'):
         
         # --- placeholders
-        self._precomputed_embeddings = tf.placeholder(shape=[None, 128], dtype=tf.float32)
+        self._pretrained_resnet50_vectors = tf.placeholder(shape=[None, 2048], dtype=tf.float32)
+        
+        # --- item vectors
+        self._item_vectors = self.trainable_item_embedding(self._pretrained_resnet50_vectors)
+        
+        # --- single-item profile vectors
+        self._single_item_profile_vectors = self.compute_user_vector(self._item_vectors, user_model_mode)
+        
+    def precompute_tensors(self, sess, pretrained_resnet50_vectors):
+        return sess.run([
+            self._item_vectors,
+            self._single_item_profile_vectors,
+        ], feed_dict={
+            self._pretrained_resnet50_vectors: pretrained_resnet50_vectors,
+        })
+
+class ContentBasedLearn2RankNetwork_Evaluation(ContentBasedLearn2RankNetwork_Base):
+    def __init__(self, user_model_mode='DEFAULT'):
+        
+        # --- placeholders
+        self._precomputed_item_vectors = tf.placeholder(shape=[None, 128], dtype=tf.float32)
         self._profile_item_indexes = tf.placeholder(shape=[None], dtype=tf.int32)
         self._candidate_item_indexes = tf.placeholder(shape=[None], dtype=tf.int32)
             
         # ---- user profile vector
         
-        # profile item embeddings average
-        tmp = tf.gather(self._precomputed_embeddings, self._profile_item_indexes) 
+        # profile item average
+        tmp = tf.gather(self._precomputed_item_vectors, self._profile_item_indexes) 
         self._profile_items_average = tf.reshape(tf.reduce_mean(tmp, axis=0), (1, 128))
         
-        
-        if user_model_mode == 'BIGGER':
-            # user hidden layer 1
-            self._user_hidden_1 = tf.layers.dense(
-                inputs=self._profile_items_average,
-                units=256,
-                activation=tf.nn.selu,
-                name='user_hidden_1'
-            )
-            # user hidden layer 2
-            self._user_hidden_2 = tf.layers.dense(
-                inputs=self._user_hidden_1,
-                units=256,
-                activation=tf.nn.selu,
-                name='user_hidden_2'
-            )
-            # user final vector
-            self._user_vector = tf.layers.dense(
-                inputs=self._user_hidden_2,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_vector'
-            )
-        elif user_model_mode == 'BIG':
-            # user hidden layer
-            self._user_hidden = tf.layers.dense(
-                inputs=self._profile_items_average,
-                units=256,
-                activation=tf.nn.selu,
-                name='user_hidden'
-            )
-            # user final vector
-            self._user_vector = tf.layers.dense(
-                inputs=self._user_hidden,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_vector'
-            )
-        elif user_model_mode == 'DEFAULT':
-            # user hidden layer
-            self._user_hidden = tf.layers.dense(
-                inputs=self._profile_items_average,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_hidden'
-            )
-            # user final vector
-            self._user_vector = tf.layers.dense(
-                inputs=self._user_hidden,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_vector'
-            )
-        else: assert False
+        # user vector
+        self._user_vector = self.compute_user_vector(self._profile_items_average, user_model_mode)
         
         # ---- candidate item vectors
-        self._candidate_item_vectors = tf.gather(self._precomputed_embeddings, self._candidate_item_indexes)
+        self._candidate_item_vectors = tf.gather(self._precomputed_item_vectors,
+                                                 self._candidate_item_indexes)
         
-        # ---- match score
-        self._match_score = tf.reduce_sum(tf.multiply(self._user_vector, self._candidate_item_vectors), 1)
+        # ---- match scores
+        self._match_scores = tf.reduce_sum(tf.multiply(self._user_vector,
+                                                      self._candidate_item_vectors), 1)
     
-    def get_match_scores(self, sess, precomputed_embeddings, profile_item_indexes, candidate_items_indexes):
+    def get_match_scores(self, sess, precomputed_item_vectors, profile_item_indexes, candidate_items_indexes):
         return sess.run(
-            self._match_score, feed_dict={
-            self._precomputed_embeddings: precomputed_embeddings,
+            self._match_scores, feed_dict={
+            self._precomputed_item_vectors: precomputed_item_vectors,
             self._profile_item_indexes: profile_item_indexes,
             self._candidate_item_indexes: candidate_items_indexes,
+        })
+    
+class VBPR_Network:
+    def __init__(self, n_users, n_items, user_latent_dim, item_latent_dim, item_visual_dim, pretrained_dim=2048):
+        
+        assert (user_latent_dim == item_latent_dim + item_visual_dim)
+        
+        self._item_visual_dim = item_visual_dim
+        
+        # --- placeholders
+        self._pretrained_image_embeddings = tf.placeholder(shape=[None, pretrained_dim], dtype=tf.float32,
+                                                     name='pretrained_image_embeddings')    
+        self._user_index = tf.placeholder(shape=[None], dtype=tf.int32,
+                                          name='user_index')
+        self._positive_item_index = tf.placeholder(shape=[None], dtype=tf.int32,
+                                                   name='positive_item_index')
+        self._negative_item_index = tf.placeholder(shape=[None], dtype=tf.int32,
+                                                   name='negative_item_index')
+        self._learning_rate = tf.placeholder(shape=[], dtype=tf.float32)
+            
+        # ------------------------------------
+        # ---- Global trainable variables
+        
+        # -- user latent factor matrix
+        # (n_users x user_latent_dim)
+        self._user_latent_factors = tf.Variable(
+            tf.random_uniform([n_users, user_latent_dim], -1.0, 1.0),
+            name='user_latent_factors'
+        )
+        
+        # -- item latent factor matrix
+        # (n_items x item_latent_dim)
+        self._item_latent_factors = tf.Variable(
+            tf.random_uniform([n_items, item_latent_dim], -1.0, 1.0),
+            name='item_latent_factors'
+        )
+        
+        # -- item latent biases
+        self._item_latent_biases = tf.Variable(
+            tf.random_uniform([n_items], -1.0, 1.0),
+            name='item_latent_biases'
+        )
+        
+        # -- global visual bias
+        self._visual_bias = tf.Variable(
+            tf.random_uniform([pretrained_dim], -1.0, 1.0),
+            name='visual_bias'
+        )
+        
+        # -------------------------------
+        # ---- minibatch tensors
+        
+        # -- user
+        self._user_latent_vector = tf.gather(self._user_latent_factors, self._user_index)
+        
+        # -- positive item
+        self._pos_vector,\
+        self._pos_latent_bias,\
+        self._pos_visual_bias = self.get_item_variables(self._positive_item_index)
+        self._pos_score = tf.reduce_sum(self._user_latent_vector * self._pos_vector, 1) +\
+                    self._pos_latent_bias +\
+                    self._pos_visual_bias
+        
+        # -- negative item
+        self._neg_vector,\
+        self._neg_latent_bias,\
+        self._neg_visual_bias = self.get_item_variables(self._negative_item_index)
+        self._neg_score = tf.reduce_sum(self._user_latent_vector * self._neg_vector, 1) +\
+                    self._neg_latent_bias +\
+                    self._neg_visual_bias
+        
+        # -------------------------------
+        # ---- train-test tensors
+        
+        # -- train loss
+        delta_score = self._pos_score - self._neg_score
+        ones = tf.fill(tf.shape(self._user_latent_vector)[:1], 1.0)
+        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=delta_score, labels=ones)
+        loss = tf.reduce_mean(loss, name='train_loss')
+        self._train_loss = loss
+        
+        # -- test accuracy
+        accuracy = tf.reduce_sum(tf.cast(delta_score > .0, tf.float32), name='test_accuracy')
+        self._test_accuracy = accuracy
+        
+        # -- optimizer
+        self._optimizer = tf.train.AdamOptimizer(self._learning_rate).minimize(self._train_loss)
+        
+    def get_item_variables(self, item_index):
+        pre_vector = tf.gather(self._pretrained_image_embeddings, item_index)
+        # 1) item vector
+        #    1.1) visual vector
+        visual_vector = self.trainable_image_embedding(pre_vector, self._item_visual_dim)
+        #    1.2) latent vector
+        latent_vector = tf.gather(self._item_latent_factors, item_index)
+        #    1.3) concatenation
+        final_vector = tf.concat([visual_vector, latent_vector], 1)
+        # 2) latent bias
+        latent_bias = tf.gather(self._item_latent_biases, item_index)
+        # 3) visual bias
+        visual_bias = tf.reduce_sum(pre_vector * self._visual_bias, 1)
+        # return
+        return final_vector, latent_bias, visual_bias
+        
+    @staticmethod
+    def trainable_image_embedding(X, output_dim):
+        with tf.variable_scope("trainable_image_embedding", reuse=tf.AUTO_REUSE):
+            fc1 = tf.layers.dense( # None -> output_dim
+                inputs=X,
+                units=output_dim,
+                name='fc1'
+            )
+            return fc1
+    
+    def optimize_and_get_train_loss(self, sess, pretrained_image_embeddings, user_index, positive_item_index,
+                                    negative_item_index, learning_rate):
+        return sess.run([
+            self._optimizer,
+            self._train_loss,
+        ], feed_dict={
+            self._pretrained_image_embeddings: pretrained_image_embeddings,
+            self._user_index: user_index,
+            self._positive_item_index: positive_item_index,
+            self._negative_item_index: negative_item_index,
+            self._learning_rate: learning_rate,
+        })
+    
+    def get_train_loss(self, sess, pretrained_image_embeddings, user_index, positive_item_index, negative_item_index):
+        return sess.run( 
+            self._train_loss, feed_dict={
+            self._pretrained_image_embeddings: pretrained_image_embeddings,
+            self._user_index: user_index,
+            self._positive_item_index: positive_item_index,
+            self._negative_item_index: negative_item_index,
+        })
+    
+    def get_test_accuracy(self, sess, pretrained_image_embeddings, user_index, positive_item_index, negative_item_index):
+        return sess.run(
+            self._test_accuracy, feed_dict={
+            self._pretrained_image_embeddings: pretrained_image_embeddings,
+            self._user_index: user_index,
+            self._positive_item_index: positive_item_index,
+            self._negative_item_index: negative_item_index,
+        })
+    
+class VBPR_Network_Evaluation:
+    def __init__(self, n_users, n_items, user_latent_dim, item_latent_dim, item_visual_dim,
+                 pretrained_dim=2048):
+        
+        # --- placeholders
+        self._pretrained_image_embeddings = tf.placeholder(shape=[None, pretrained_dim], dtype=tf.float32)
+        self._item_index = tf.placeholder(shape=[None], dtype=tf.int32)
+            
+        # ------------------------------------
+        # ---- Global trainable variables
+        
+        # -- user latent factor matrix
+        # (n_users x user_latent_dim)
+        self._user_latent_factors = tf.Variable(
+            tf.random_uniform([n_users, user_latent_dim], -1.0, 1.0),
+            name='user_latent_factors'
+        )
+        
+        # -- item latent factor matrix
+        # (n_items x item_latent_dim)
+        self._item_latent_factors = tf.Variable(
+            tf.random_uniform([n_items, item_latent_dim], -1.0, 1.0),
+            name='item_latent_factors'
+        )
+        
+        # -- item latent biases
+        self._item_latent_biases = tf.Variable(
+            tf.random_uniform([n_items], -1.0, 1.0),
+            name='item_latent_biases'
+        )
+        
+        # -- global visual bias
+        self._visual_bias = tf.Variable(
+            tf.random_uniform([pretrained_dim], -1.0, 1.0),
+            name='visual_bias'
+        )
+        
+        # -------------------------------
+        # ---- minibatch tensors
+        
+        item_pre_vector = tf.gather(self._pretrained_image_embeddings, self._item_index)
+        
+        # 1) item vector
+        #    1.1) visual vector
+        item_visual_vector = self.trainable_image_embedding(item_pre_vector, item_visual_dim)
+        #    1.2) latent vector
+        item_latent_vector = tf.gather(self._item_latent_factors, self._item_index)
+        #    1.3) concatenation
+        self._item_final_vector = tf.concat([item_visual_vector, item_latent_vector], 1)
+        
+        # 2) item bias
+        #    1.1) visual bias
+        item_visual_bias = tf.reduce_sum(item_pre_vector * self._visual_bias, 1)
+        #    1.2) latent bias
+        item_latent_bias = tf.gather(self._item_latent_biases, self._item_index)
+        #    1.3) final bias
+        self._item_final_bias = item_visual_bias + item_latent_bias
+        
+    @staticmethod
+    def trainable_image_embedding(X, output_dim):
+        with tf.variable_scope("trainable_image_embedding", reuse=tf.AUTO_REUSE):
+            fc1 = tf.layers.dense( # None -> output_dim
+                inputs=X,
+                units=output_dim,
+                name='fc1'
+            )
+            return fc1
+    
+    def get_item_final_vector_bias(self, sess, pretrained_image_embeddings, item_index):
+        return sess.run([
+            self._item_final_vector,
+            self._item_final_bias,
+        ], feed_dict={
+            self._pretrained_image_embeddings: pretrained_image_embeddings,
+            self._item_index: item_index,
+        })
+    
+    def get_user_latent_vectors(self, sess):
+        return sess.run(self._user_latent_factors)
+    
+
+def CNN_F(input_tensor, output_dim):
+    with tf.variable_scope("CNN_F", reuse=tf.AUTO_REUSE):
+        
+        # ---- conv layer 1
+        conv1 = tf.layers.conv2d(
+            inputs=input_tensor,
+            filters=64,
+            kernel_size=[11,11],
+            strides=4,
+            padding='same',
+            activation=tf.nn.selu,
+            name='conv1')
+        pool1 = tf.layers.max_pooling2d(
+            inputs=conv1,
+            pool_size=[2,2],
+            strides=2,
+            name='pool1')
+        
+        # ---- conv layer 2
+        conv2 = tf.layers.conv2d(
+            inputs=pool1,
+            filters=256,
+            kernel_size=[5,5],
+            strides=1,
+            padding='same',
+            activation=tf.nn.selu,
+            name='conv2')
+        pool2 = tf.layers.max_pooling2d(
+            inputs=conv2,
+            pool_size=[2,2],
+            strides=2,
+            name='pool2')
+        
+        # ---- conv layer 3
+        conv3 = tf.layers.conv2d(
+            inputs=pool2,
+            filters=256,
+            kernel_size=[3,3],
+            strides=1,
+            padding='same',
+            activation=tf.nn.selu,
+            name='conv3')
+        
+        # ---- conv layer 4
+        conv4 = tf.layers.conv2d(
+            inputs=conv3,
+            filters=256,
+            kernel_size=[3,3],
+            strides=1,
+            padding='same',
+            activation=tf.nn.selu,
+            name='conv4')
+        
+        # ---- conv layer 5
+        conv5 = tf.layers.conv2d(
+            inputs=conv4,
+            filters=256,
+            kernel_size=[3,3],
+            strides=1,
+            padding='same',
+            activation=tf.nn.selu,
+            name='conv5')
+        pool5 = tf.layers.max_pooling2d(
+            inputs=conv5,
+            pool_size=[2,2],
+            strides=2,
+            name='pool5')
+        pool5_flat = tf.layers.flatten(
+            pool5,
+            name='pool5_flat')
+        
+        # ---- full layer 6
+        fc6 = tf.layers.dense(
+            inputs=pool5_flat,
+            units=2048,
+            activation=tf.nn.selu,
+            name='fc6'
+        )
+        
+        # ---- full layer 7
+        fc7 = tf.layers.dense(
+            inputs=fc6,
+            units=512,
+            activation=tf.nn.selu,
+            name='fc7'
+        )
+        
+        # ---- full layer 8
+        fc8 = tf.layers.dense(
+            inputs=fc7,
+            units=output_dim,
+            name='fc8'
+        )
+        
+        return fc8
+    
+    
+class DVBPR_Network:
+    def __init__(self, n_users, n_items, latent_dim):        
+        
+        # ------------------------
+        # ---- placeholders
+        
+        self._RGB_images = tf.placeholder(shape=[None, 224, 224, 3], dtype=tf.float32,
+                                                     name='RGB_images')
+        self._user_index = tf.placeholder(shape=[None], dtype=tf.int32,
+                                          name='user_index')
+        self._positive_item_index = tf.placeholder(shape=[None], dtype=tf.int32,
+                                                   name='positive_item_index')
+        self._negative_item_index = tf.placeholder(shape=[None], dtype=tf.int32,
+                                                   name='negative_item_index')
+        self._learning_rate = tf.placeholder(shape=[], dtype=tf.float32)
+            
+        # ------------------------------------
+        # ---- Global trainable tensors
+        
+        # -- user latent factor matrix
+        # (n_users x user_latent_dim)
+        self._user_latent_factors = tf.Variable(
+            tf.random_uniform([n_users, latent_dim], -1.0, 1.0),
+            name='user_latent_factors'
+        )
+        
+        # -------------------------------
+        # ---- minibatch tensors
+        
+        # -- user
+        self._user_latent_vector = tf.gather(self._user_latent_factors, self._user_index)
+        
+        # -- positive item
+        self._pos_image = tf.gather(self._RGB_images, self._positive_item_index)
+        self._pos_vector = CNN_F(self._pos_image, latent_dim)
+        self._pos_score = tf.reduce_sum(self._user_latent_vector * self._pos_vector, 1)
+        
+        # -- negative item
+        self._neg_image = tf.gather(self._RGB_images, self._negative_item_index)
+        self._neg_vector = CNN_F(self._neg_image, latent_dim)
+        self._neg_score = tf.reduce_sum(self._user_latent_vector * self._neg_vector, 1)
+        
+        # -------------------------------
+        # ---- train-test tensors
+        
+        # -- train loss
+        delta_score = self._pos_score - self._neg_score
+        ones = tf.fill(tf.shape(self._user_latent_vector)[:1], 1.0)
+        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=delta_score, labels=ones)
+        loss = tf.reduce_mean(loss, name='train_loss')
+        self._train_loss = loss
+        
+        # -- test accuracy
+        accuracy = tf.reduce_sum(tf.cast(delta_score > .0, tf.float32), name='test_accuracy')
+        self._test_accuracy = accuracy
+        
+        # -- optimizer
+        self._optimizer = tf.train.AdamOptimizer(self._learning_rate).minimize(self._train_loss)
+    
+    def optimize_and_get_train_loss(self, sess, RGB_images, user_index, positive_item_index,
+                                    negative_item_index, learning_rate):
+        return sess.run([
+            self._optimizer,
+            self._train_loss,
+        ], feed_dict={
+            self._RGB_images: RGB_images,
+            self._user_index: user_index,
+            self._positive_item_index: positive_item_index,
+            self._negative_item_index: negative_item_index,
+            self._learning_rate: learning_rate,
+        })
+    
+    def get_test_accuracy(self, sess, RGB_images, user_index, positive_item_index, negative_item_index):
+        return sess.run(
+            self._test_accuracy, feed_dict={
+            self._RGB_images: RGB_images,
+            self._user_index: user_index,
+            self._positive_item_index: positive_item_index,
+            self._negative_item_index: negative_item_index,
         })
