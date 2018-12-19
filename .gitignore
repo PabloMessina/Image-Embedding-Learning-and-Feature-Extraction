@@ -1,5 +1,4 @@
 .ipynb_checkpoints/
 __pycache__/
-artworkId2ImageSize.csv
-artwork_ids.txt
+data/
 testing_debugging.ipynb

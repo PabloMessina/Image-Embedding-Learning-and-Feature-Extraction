@@ -18,12 +18,13 @@ class TrainLogger:
                         model_updated))
 
 class ContentBasedLearn2RankNetwork_Base:
+    
     @staticmethod
-    def compute_user_vector(profile_items_average, user_model_mode):
+    def compute_user_vector__from_avgpool(profile_items_avgpool, user_model_mode):
         if user_model_mode == 'BIGGER':
             # user hidden layer 1
             user_hidden_1 = tf.layers.dense(
-                inputs=profile_items_average,
+                inputs=profile_items_avgpool,
                 units=256,
                 activation=tf.nn.selu,
                 name='user_hidden_1'
@@ -45,7 +46,7 @@ class ContentBasedLearn2RankNetwork_Base:
         if user_model_mode == 'BIG':
             # user hidden layer
             user_hidden = tf.layers.dense(
-                inputs=profile_items_average,
+                inputs=profile_items_avgpool,
                 units=256,
                 activation=tf.nn.selu,
                 name='user_hidden'
@@ -60,7 +61,7 @@ class ContentBasedLearn2RankNetwork_Base:
         if user_model_mode == 'DEFAULT':
             # user hidden layer
             user_hidden = tf.layers.dense(
-                inputs=profile_items_average,
+                inputs=profile_items_avgpool,
                 units=128,
                 activation=tf.nn.selu,
                 name='user_hidden'
@@ -73,6 +74,28 @@ class ContentBasedLearn2RankNetwork_Base:
                 name='user_vector'
             )
         assert False
+    
+    @staticmethod
+    def compute_user_vector__from_avgpool_maxpool(profile_items_avgpool, profile_items_maxpool):
+        
+        # concatenate avgpool + maxpool
+        profile_vector = tf.concat([profile_items_avgpool, profile_items_maxpool], 1)
+        
+        # user hidden layer 1
+        user_hidden_1 = tf.layers.dense(
+            inputs=profile_vector,
+            units=256,
+            activation=tf.nn.selu,
+            name='user_hidden_1'
+        )
+
+        # user final vector
+        return tf.layers.dense(
+            inputs=user_hidden_1,
+            units=128,
+            activation=tf.nn.selu,
+            name='user_vector'
+        )
     
     @staticmethod
     def trainable_item_embedding(X):
@@ -92,7 +115,7 @@ class ContentBasedLearn2RankNetwork_Base:
             return fc2
 
 class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
-    def __init__(self, user_model_mode='DEFAULT'):
+    def __init__(self, profile_pooling_mode='AVG', *user_vector_args):
         
         # --- placeholders
         self._pretrained_embeddings = tf.placeholder(shape=[None, 2048], dtype=tf.float32,
@@ -109,17 +132,38 @@ class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
 
         # ---- user profile vector
         
-        # profile item embeddings average
+        # profile item embeddings
         tmp = tf.gather(self._pretrained_embeddings, self._profile_item_indexes)
         self._profile_item_embeddings = self.trainable_item_embedding(tmp)
-        self._profile_masks = tf.expand_dims(tf.sequence_mask(self._profile_sizes, dtype=tf.float32), -1)
-        self._masked_profile_item_embeddings = tf.multiply(self._profile_item_embeddings, self._profile_masks)        
-        self._profile_items_average =\
-            tf.reduce_sum(self._masked_profile_item_embeddings, axis=1) /\
+        
+        # avgpool masking
+        self._profile_masks__avgpool = tf.expand_dims(tf.sequence_mask(self._profile_sizes, dtype=tf.float32), -1)        
+        self._masked_profile_item_embeddings__avgpool =\
+            self._profile_item_embeddings * self._profile_masks__avgpool
+        
+        # maxpool masking
+        self._profile_masks__maxpool = (1. - self._profile_masks__avgpool) * -9999.
+        self._masked_profile_item_embeddings__maxpool =\
+            self._masked_profile_item_embeddings__avgpool + self._profile_masks__maxpool
+        
+        # items avgpool
+        self._profile_items_avgpool =\
+            tf.reduce_sum(self._masked_profile_item_embeddings__avgpool, axis=1) /\
             tf.reshape(self._profile_sizes, [-1, 1])
         
+        # items maxpool
+        self._profile_items_maxpool =\
+            tf.reduce_max(self._masked_profile_item_embeddings__maxpool, axis=1)
+        
         # user vector
-        self._user_vector = self.compute_user_vector(self._profile_items_average, user_model_mode)
+        if profile_pooling_mode == 'AVG':            
+            self._user_vector = self.compute_user_vector__from_avgpool(
+                self._profile_items_avgpool, *user_vector_args)
+        else:
+            assert profile_pooling_mode == 'AVG+MAX'
+            self._user_vector = self.compute_user_vector__from_avgpool_maxpool(
+                self._profile_items_avgpool,
+                self._profile_items_maxpool)
         
         # ---- positive item vector
         tmp = tf.gather(self._pretrained_embeddings, self._positive_item_index)
@@ -172,7 +216,7 @@ class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
         })
 
 class ContentBasedLearn2RankNetwork_Precomputation(ContentBasedLearn2RankNetwork_Base):
-    def __init__(self, user_model_mode='DEFAULT'):
+    def __init__(self):
         
         # --- placeholders
         self._pretrained_resnet50_vectors = tf.placeholder(shape=[None, 2048], dtype=tf.float32)
@@ -180,19 +224,13 @@ class ContentBasedLearn2RankNetwork_Precomputation(ContentBasedLearn2RankNetwork
         # --- item vectors
         self._item_vectors = self.trainable_item_embedding(self._pretrained_resnet50_vectors)
         
-        # --- single-item profile vectors
-        self._single_item_profile_vectors = self.compute_user_vector(self._item_vectors, user_model_mode)
-        
     def precompute_tensors(self, sess, pretrained_resnet50_vectors):
-        return sess.run([
-            self._item_vectors,
-            self._single_item_profile_vectors,
-        ], feed_dict={
+        return sess.run(self._item_vectors, feed_dict={
             self._pretrained_resnet50_vectors: pretrained_resnet50_vectors,
         })
 
 class ContentBasedLearn2RankNetwork_Evaluation(ContentBasedLearn2RankNetwork_Base):
-    def __init__(self, user_model_mode='DEFAULT'):
+    def __init__(self, profile_pooling_mode='AVG', *user_vector_args):
         
         # --- placeholders
         self._precomputed_item_vectors = tf.placeholder(shape=[None, 128], dtype=tf.float32)
@@ -201,20 +239,30 @@ class ContentBasedLearn2RankNetwork_Evaluation(ContentBasedLearn2RankNetwork_Bas
             
         # ---- user profile vector
         
-        # profile item average
         tmp = tf.gather(self._precomputed_item_vectors, self._profile_item_indexes) 
-        self._profile_items_average = tf.reshape(tf.reduce_mean(tmp, axis=0), (1, 128))
+        
+        # profile items avgpool
+        self._profile_items_avgpool = tf.reshape(tf.reduce_mean(tmp, axis=0), (1, 128))
+        
+        # profile items maxpool
+        self._profile_items_maxpool = tf.reshape(tf.reduce_max(tmp, axis=0), (1, 128))
         
         # user vector
-        self._user_vector = self.compute_user_vector(self._profile_items_average, user_model_mode)
+        if profile_pooling_mode == 'AVG':            
+            self._user_vector = self.compute_user_vector__from_avgpool(
+                self._profile_items_avgpool, *user_vector_args)
+        else:
+            assert profile_pooling_mode == 'AVG+MAX'
+            self._user_vector = self.compute_user_vector__from_avgpool_maxpool(
+                self._profile_items_avgpool,
+                self._profile_items_maxpool)
         
         # ---- candidate item vectors
         self._candidate_item_vectors = tf.gather(self._precomputed_item_vectors,
                                                  self._candidate_item_indexes)
         
         # ---- match scores
-        self._match_scores = tf.reduce_sum(tf.multiply(self._user_vector,
-                                                      self._candidate_item_vectors), 1)
+        self._match_scores = tf.reduce_sum(self._user_vector * self._candidate_item_vectors, 1)
     
     def get_match_scores(self, sess, precomputed_item_vectors, profile_item_indexes, candidate_items_indexes):
         return sess.run(
