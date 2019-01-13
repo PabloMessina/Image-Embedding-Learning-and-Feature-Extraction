@@ -105,16 +105,44 @@ def plot_images(plt, image_cache, ids):
         ax.imshow(img, interpolation="nearest")
     plt.show()
     
+    
+def read_ids_file(dirpath, ids_filename):
+    from os import path    
+    filepath = path.join(dirpath, ids_filename)
+    if ids_filename[-5:] == '.json':
+        with open(filepath) as f:
+            index2id = json.load(f)
+    elif ids_filename[-4:] == '.npy':
+        import numpy as np
+        index2id = np.load(filepath)
+    else:
+        assert ids_filename[-3:] == 'ids'
+        with open(filepath) as f:
+            index2id = [int(x) for x in f.readlines()]
+    id2index = {_id:i for i, _id in enumerate(index2id)}
+    return index2id, id2index
+
 def load_embeddings_and_ids(dirpath, embedding_file, ids_file):
     import numpy as np
     from os import path
-    embeddings = np.load(path.join(dirpath, embedding_file))
-    with open(path.join(dirpath, ids_file)) as f:
-        ids = [int(x) for x in f.readlines()]
-        id2index = { _id:i for i,_id in enumerate(ids) }    
-    assert (embeddings.shape[0] == len(ids))
-    return embeddings, ids, id2index
+    featmat = np.load(path.join(dirpath, embedding_file))
+    index2id, id2index = read_ids_file(dirpath, ids_file)
+    return dict(
+        featmat=featmat,
+        index2id=index2id,
+        id2index=id2index,
+    )
 
+def concatenate_featmats(artwork_ids, featmat_list, id2index_list):    
+    assert len(featmat_list) == len(id2index_list)
+    import numpy as np
+    n = len(artwork_ids)
+    m = sum(fm.shape[1] for fm in featmat_list)
+    out_mat = np.empty(shape=(n,m))
+    for i, _id in enumerate(artwork_ids):
+        out_mat[i] = np.concatenate(
+            [fm[id2index[_id]] for fm, id2index in zip(featmat_list, id2index_list)])
+    return out_mat
 
 class User:
     def __init__(self, uid):
@@ -124,23 +152,38 @@ class User:
         self.artwork_idxs_set = set()
         self.timestamps = []
         self.artist_ids_set = set()
+        self.cluster_ids_set = set()
         
     def clear(self):
         self.artwork_ids.clear()
         self.artwork_idxs.clear()
         self.artwork_idxs_set.clear()        
         self.artist_ids_set.clear()
+        self.cluster_ids_set.clear()
         self.timestamps.clear()
+    
+    def refresh_nonpurchased_cluster_ids(self, n_clusters):
+        self.nonp_cluster_ids = [c for c in range(n_clusters) if c not in self.cluster_ids_set]
+        assert len(self.nonp_cluster_ids) > 0
         
-    def append_transaction(self, artwork_id, timestamp, artwork_id2index, artist_ids):
+    def refresh_cluster_ids(self):
+        self.cluster_ids = list(self.cluster_ids_set)
+        assert len(self.cluster_ids) > 0
+        
+    def refresh_artist_ids(self):
+        self.artist_ids = list(self.artist_ids_set)
+        assert len(self.artist_ids) > 0
+        
+    def append_transaction(self, artwork_id, timestamp, artwork_id2index, artist_ids, cluster_ids):
         aidx = artwork_id2index[artwork_id]
         self.artwork_ids.append(artwork_id)
         self.artwork_idxs.append(aidx)
         self.artwork_idxs_set.add(aidx)
         self.artist_ids_set.add(artist_ids[aidx])
+        self.cluster_ids_set.add(cluster_ids[aidx])
         self.timestamps.append(timestamp)
     
-    def remove_last_nonfirst_purchase_basket(self, artwork_id2index, artist_ids):
+    def remove_last_nonfirst_purchase_basket(self, artwork_id2index, artist_ids, cluster_ids):
         baskets = self.baskets
         len_before = len(baskets)
         if len_before >= 2:
@@ -149,7 +192,7 @@ class User:
             timestamps = self.timestamps[:last_b[0]]
             self.clear()
             for aid, t in zip(artwork_ids, timestamps):
-                self.append_transaction(aid, t, artwork_id2index, artist_ids)
+                self.append_transaction(aid, t, artwork_id2index, artist_ids, cluster_ids)
             assert len(self.baskets) == len_before - 1
         
     def build_purchase_baskets(self):
@@ -186,3 +229,35 @@ class User:
             assert(b1[0] + b1[1] == b2[0])
         assert(baskets[0][0] == 0)
         assert(baskets[-1][0] + baskets[-1][1] == n)
+        
+class VisualDuplicateDetector:
+    def __init__(self, cluster_ids, embeddings):        
+        self._cluster_ids = cluster_ids
+        self._embeddings = embeddings
+        self._equalityCache = dict()
+        self.count = 0
+        
+    def same(self,i,j):
+        if self._cluster_ids[i] != self._cluster_ids[j]:
+            return False
+        if i > j:
+            i, j = j, i
+        k = (i,j)
+        try:
+            ans = self._equalityCache[k]
+        except KeyError:
+            from numpy import array_equal
+            ans = self._equalityCache[k] = array_equal(self._embeddings[i], self._embeddings[j])
+        if ans:
+            self.count += 1
+        return ans
+    
+def get_decaying_learning_rates(maxlr, minlr, decay_coef):
+    assert maxlr > minlr > 0
+    assert 0 < decay_coef < 1
+    lrs = []
+    lr = maxlr
+    while lr >= minlr:
+        lrs.append(lr)
+        lr *= decay_coef
+    return lrs

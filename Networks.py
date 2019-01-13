@@ -271,8 +271,23 @@ class ContentBasedLearn2RankNetwork_Evaluation(ContentBasedLearn2RankNetwork_Bas
             self._profile_item_indexes: profile_item_indexes,
             self._candidate_item_indexes: candidate_items_indexes,
         })
+
     
-class VBPR_Network:
+class VBPR_Network_Base:
+    
+    @staticmethod
+    def trainable_image_embedding(X, output_dim):
+        with tf.variable_scope("trainable_image_embedding", reuse=tf.AUTO_REUSE):
+            fc1 = tf.layers.dense( # None -> output_dim
+                inputs=X,
+                units=output_dim,
+                name='fc1',
+                use_bias=False,
+                activation=None,
+            )
+            return fc1
+    
+class VBPR_Network_Train(VBPR_Network_Base):
     def __init__(self, n_users, n_items, user_latent_dim, item_latent_dim, item_visual_dim, pretrained_dim=2048):
         
         assert (user_latent_dim == item_latent_dim + item_visual_dim)
@@ -373,16 +388,6 @@ class VBPR_Network:
         visual_bias = tf.reduce_sum(pre_vector * self._visual_bias, 1)
         # return
         return final_vector, latent_bias, visual_bias
-        
-    @staticmethod
-    def trainable_image_embedding(X, output_dim):
-        with tf.variable_scope("trainable_image_embedding", reuse=tf.AUTO_REUSE):
-            fc1 = tf.layers.dense( # None -> output_dim
-                inputs=X,
-                units=output_dim,
-                name='fc1'
-            )
-            return fc1
     
     def optimize_and_get_train_loss(self, sess, pretrained_image_embeddings, user_index, positive_item_index,
                                     negative_item_index, learning_rate):
@@ -415,7 +420,7 @@ class VBPR_Network:
             self._negative_item_index: negative_item_index,
         })
     
-class VBPR_Network_Evaluation:
+class VBPR_Network_Evaluation(VBPR_Network_Base):
     def __init__(self, n_users, n_items, user_latent_dim, item_latent_dim, item_visual_dim,
                  pretrained_dim=2048):
         
@@ -472,16 +477,6 @@ class VBPR_Network_Evaluation:
         item_latent_bias = tf.gather(self._item_latent_biases, self._item_index)
         #    1.3) final bias
         self._item_final_bias = item_visual_bias + item_latent_bias
-        
-    @staticmethod
-    def trainable_image_embedding(X, output_dim):
-        with tf.variable_scope("trainable_image_embedding", reuse=tf.AUTO_REUSE):
-            fc1 = tf.layers.dense( # None -> output_dim
-                inputs=X,
-                units=output_dim,
-                name='fc1'
-            )
-            return fc1
     
     def get_item_final_vector_bias(self, sess, pretrained_image_embeddings, item_index):
         return sess.run([
