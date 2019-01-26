@@ -17,108 +17,52 @@ class TrainLogger:
                         n_train_tuples, n_validation_tuples, elapsed_seconds, batch_size, learning_rate,
                         model_updated))
 
-class ContentBasedLearn2RankNetwork_Base:
+class ContentBasedLearn2RankNetwork_Base:        
     
     @staticmethod
-    def compute_user_vector__from_avgpool(profile_items_avgpool, user_model_mode):
-        if user_model_mode == 'BIGGER':
-            # user hidden layer 1
-            user_hidden_1 = tf.layers.dense(
-                inputs=profile_items_avgpool,
-                units=256,
-                activation=tf.nn.selu,
-                name='user_hidden_1'
-            )
-            # user hidden layer 2
-            user_hidden_2 = tf.layers.dense(
-                inputs=user_hidden_1,
-                units=256,
-                activation=tf.nn.selu,
-                name='user_hidden_2'
-            )
-            # user final vector
-            return tf.layers.dense(
-                inputs=user_hidden_2,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_vector'
-            )
-        if user_model_mode == 'BIG':
-            # user hidden layer
-            user_hidden = tf.layers.dense(
-                inputs=profile_items_avgpool,
-                units=256,
-                activation=tf.nn.selu,
-                name='user_hidden'
-            )
-            # user final vector
-            return tf.layers.dense(
-                inputs=user_hidden,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_vector'
-            )
-        if user_model_mode == 'DEFAULT':
-            # user hidden layer
-            user_hidden = tf.layers.dense(
-                inputs=profile_items_avgpool,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_hidden'
-            )
-            # user final vector
-            user_vector = tf.layers.dense(
-                inputs=user_hidden,
-                units=128,
-                activation=tf.nn.selu,
-                name='user_vector'
-            )
-        assert False
-    
-    @staticmethod
-    def compute_user_vector__from_avgpool_maxpool(profile_items_avgpool, profile_items_maxpool):
+    def compute_user_embedding(profile_aggregation_vector, user_layer_units):
+        last_output = profile_aggregation_vector
+        n_layers = len(user_layer_units)
         
-        # concatenate avgpool + maxpool
-        profile_vector = tf.concat([profile_items_avgpool, profile_items_maxpool], 1)
+        # hidden layers
+        for i in range(n_layers-1):
+            last_output = tf.layers.dense(
+                inputs=last_output,
+                units=user_layer_units[i],
+                activation=tf.nn.selu,
+                name='user_hidden_%d' % (i+1)
+            )
         
-        # user hidden layer 1
-        user_hidden_1 = tf.layers.dense(
-            inputs=profile_vector,
-            units=256,
-            activation=tf.nn.selu,
-            name='user_hidden_1'
-        )
-
         # user final vector
         return tf.layers.dense(
-            inputs=user_hidden_1,
-            units=128,
+            inputs=last_output,
+            units=user_layer_units[-1],
             activation=tf.nn.selu,
             name='user_vector'
         )
     
     @staticmethod
-    def trainable_item_embedding(X):
+    def compute_item_embedding(X, item_layer_units):
         with tf.variable_scope("trainable_item_embedding", reuse=tf.AUTO_REUSE):
-            fc1 = tf.layers.dense( # None -> 256
-                inputs=X,
-                units=256,
-                activation=tf.nn.selu,
-                name='fc1'
-            )
-            fc2 = tf.layers.dense( # 256 -> 128
-                inputs=fc1,
-                units=128,
-                activation=tf.nn.selu,
-                name='fc2'
-            )
-            return fc2
+            last_output = X
+            for i, units in enumerate(item_layer_units):
+                last_output = tf.layers.dense(
+                    inputs=last_output,
+                    units=units,
+                    activation=tf.nn.selu,
+                    name='fc%d' % (i+1)
+                )
+            return last_output
 
 class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
-    def __init__(self, profile_pooling_mode='AVG', *user_vector_args):
+    def __init__(self, pretrained_embedding_dim, user_layer_units, item_layer_units,
+                 profile_pooling_mode='AVG'):
+        
+        assert user_layer_units[-1] == item_layer_units[-1]
         
         # --- placeholders
-        self._pretrained_embeddings = tf.placeholder(shape=[None, 2048], dtype=tf.float32,
+        self._pretrained_embeddings = tf.placeholder(shape=[None, pretrained_embedding_dim],
+                                                     dtype=tf.float32,
                                                      name='pretrained_embeddings')            
         self._profile_item_indexes = tf.placeholder(shape=[None,None], dtype=tf.int32,
                                                     name='profile_item_indexes')
@@ -130,11 +74,11 @@ class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
                                                    name='negative_item_index')
         self._learning_rate = tf.placeholder(shape=[], dtype=tf.float32)
 
-        # ---- user profile vector
+        # ---- aggregate user profile and output user embedding
         
         # profile item embeddings
         tmp = tf.gather(self._pretrained_embeddings, self._profile_item_indexes)
-        self._profile_item_embeddings = self.trainable_item_embedding(tmp)
+        self._profile_item_embeddings = self.compute_item_embedding(tmp, item_layer_units)
         
         # avgpool masking
         self._profile_masks__avgpool = tf.expand_dims(tf.sequence_mask(self._profile_sizes, dtype=tf.float32), -1)        
@@ -156,22 +100,25 @@ class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
             tf.reduce_max(self._masked_profile_item_embeddings__maxpool, axis=1)
         
         # user vector
-        if profile_pooling_mode == 'AVG':            
-            self._user_vector = self.compute_user_vector__from_avgpool(
-                self._profile_items_avgpool, *user_vector_args)
+        if profile_pooling_mode == 'AVG':
+            profile_aggregation_vector = self._profile_items_avgpool            
         else:
             assert profile_pooling_mode == 'AVG+MAX'
-            self._user_vector = self.compute_user_vector__from_avgpool_maxpool(
+            profile_aggregation_vector = tf.concat([
                 self._profile_items_avgpool,
-                self._profile_items_maxpool)
+                self._profile_items_maxpool], 1)
+        self._user_vector = self.compute_user_embedding(
+            profile_aggregation_vector,
+            user_layer_units,
+        )
         
         # ---- positive item vector
         tmp = tf.gather(self._pretrained_embeddings, self._positive_item_index)
-        self._positive_item_vector = self.trainable_item_embedding(tmp)
+        self._positive_item_vector = self.compute_item_embedding(tmp, item_layer_units)
         
         # ---- negative item vector
         tmp = tf.gather(self._pretrained_embeddings, self._negative_item_index)
-        self._negative_item_vector = self.trainable_item_embedding(tmp)
+        self._negative_item_vector = self.compute_item_embedding(tmp, item_layer_units)
         
         # --- train loss
         dot_pos = tf.reduce_sum(tf.multiply(self._user_vector, self._positive_item_vector), 1)
@@ -216,24 +163,26 @@ class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
         })
 
 class ContentBasedLearn2RankNetwork_Precomputation(ContentBasedLearn2RankNetwork_Base):
-    def __init__(self):
+    def __init__(self, pretrained_embedding_dim, item_layer_units):        
         
         # --- placeholders
-        self._pretrained_resnet50_vectors = tf.placeholder(shape=[None, 2048], dtype=tf.float32)
+        self._pretrained_embeddings = tf.placeholder(shape=[None, pretrained_embedding_dim], dtype=tf.float32)
         
         # --- item vectors
-        self._item_vectors = self.trainable_item_embedding(self._pretrained_resnet50_vectors)
+        self._item_vectors = self.compute_item_embedding(self._pretrained_embeddings, item_layer_units)
         
-    def precompute_tensors(self, sess, pretrained_resnet50_vectors):
+    def precompute_tensors(self, sess, pretrained_embeddings):
         return sess.run(self._item_vectors, feed_dict={
-            self._pretrained_resnet50_vectors: pretrained_resnet50_vectors,
+            self._pretrained_embeddings: pretrained_embeddings,
         })
 
 class ContentBasedLearn2RankNetwork_Evaluation(ContentBasedLearn2RankNetwork_Base):
-    def __init__(self, profile_pooling_mode='AVG', *user_vector_args):
+    def __init__(self, user_layer_units, latent_space_dim, profile_pooling_mode='AVG'):
+        
+        assert user_layer_units[-1] == latent_space_dim
         
         # --- placeholders
-        self._precomputed_item_vectors = tf.placeholder(shape=[None, 128], dtype=tf.float32)
+        self._precomputed_item_vectors = tf.placeholder(shape=[None, latent_space_dim], dtype=tf.float32)
         self._profile_item_indexes = tf.placeholder(shape=[None], dtype=tf.int32)
         self._candidate_item_indexes = tf.placeholder(shape=[None], dtype=tf.int32)
             
@@ -242,20 +191,23 @@ class ContentBasedLearn2RankNetwork_Evaluation(ContentBasedLearn2RankNetwork_Bas
         tmp = tf.gather(self._precomputed_item_vectors, self._profile_item_indexes) 
         
         # profile items avgpool
-        self._profile_items_avgpool = tf.reshape(tf.reduce_mean(tmp, axis=0), (1, 128))
+        self._profile_items_avgpool = tf.reshape(tf.reduce_mean(tmp, axis=0), (1, latent_space_dim))
         
         # profile items maxpool
-        self._profile_items_maxpool = tf.reshape(tf.reduce_max(tmp, axis=0), (1, 128))
+        self._profile_items_maxpool = tf.reshape(tf.reduce_max(tmp, axis=0), (1, latent_space_dim))
         
         # user vector
-        if profile_pooling_mode == 'AVG':            
-            self._user_vector = self.compute_user_vector__from_avgpool(
-                self._profile_items_avgpool, *user_vector_args)
+        if profile_pooling_mode == 'AVG':
+            profile_aggregation_vector = self._profile_items_avgpool            
         else:
             assert profile_pooling_mode == 'AVG+MAX'
-            self._user_vector = self.compute_user_vector__from_avgpool_maxpool(
+            profile_aggregation_vector = tf.concat([
                 self._profile_items_avgpool,
-                self._profile_items_maxpool)
+                self._profile_items_maxpool], 1)
+        self._user_vector = self.compute_user_embedding(
+            profile_aggregation_vector,
+            user_layer_units,
+        )
         
         # ---- candidate item vectors
         self._candidate_item_vectors = tf.gather(self._precomputed_item_vectors,

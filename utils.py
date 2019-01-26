@@ -230,27 +230,46 @@ class User:
         assert(baskets[0][0] == 0)
         assert(baskets[-1][0] + baskets[-1][1] == n)
         
-class VisualDuplicateDetector:
-    def __init__(self, cluster_ids, embeddings):        
+class VisualSimilarityHandler:
+    def __init__(self, cluster_ids, embeddings):
         self._cluster_ids = cluster_ids
-        self._embeddings = embeddings
-        self._equalityCache = dict()
+        self._cosineSimCache = dict()
         self.count = 0
+        # store embeddings with l2 normalization
+        from numpy.linalg import norm
+        from numpy import reshape
+        self._embeddings = embeddings / reshape(norm(embeddings, axis=1), (-1,1))
         
     def same(self,i,j):
         if self._cluster_ids[i] != self._cluster_ids[j]:
-            return False
+            return False        
+        if abs(self.similarity(i,j) - 1.) < 1e-7:
+            self.count += 1
+            return True
+        return False
+    
+    def similarity(self,i,j):
         if i > j:
             i, j = j, i
         k = (i,j)
         try:
-            ans = self._equalityCache[k]
+            sim = self._cosineSimCache[k]
         except KeyError:
-            from numpy import array_equal
-            ans = self._equalityCache[k] = array_equal(self._embeddings[i], self._embeddings[j])
-        if ans:
-            self.count += 1
-        return ans
+            from numpy import dot
+            sim = self._cosineSimCache[k] = dot(self._embeddings[i], self._embeddings[j])
+        return sim
+    
+    def validate_triple(self, q, p, n, margin=0.05):
+        cq = self._cluster_ids[q]
+        cp = self._cluster_ids[p]
+        cn = self._cluster_ids[n]
+        if cq == cp and cq != cn:
+            return True
+        if cq == cn and cq != cp:
+            return False
+        if self.similarity(q,p) > self.similarity(q,n) + margin:
+            return True
+        return False        
     
 def get_decaying_learning_rates(maxlr, minlr, decay_coef):
     assert maxlr > minlr > 0
