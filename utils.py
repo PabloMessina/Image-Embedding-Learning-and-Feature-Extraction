@@ -280,3 +280,21 @@ def get_decaying_learning_rates(maxlr, minlr, decay_coef):
         lrs.append(lr)
         lr *= decay_coef
     return lrs
+
+def ground_truth_rank_indexes(ranked_inventory_ids, gt_ids_set):
+    indexes = []
+    for i, _id in enumerate(ranked_inventory_ids):
+        if _id in gt_ids_set:
+            indexes.append(i)
+    return indexes
+
+def auc_exact(ground_truth_indexes, inventory_size):
+    n = len(ground_truth_indexes)
+    assert inventory_size >= n
+    if inventory_size == n:
+        return 1
+    auc = 0
+    for i, idx in enumerate(ground_truth_indexes):
+        auc += ((inventory_size - (idx+1)) - (n - (i+1))) / (inventory_size - n)
+    auc /= n
+    return auc
