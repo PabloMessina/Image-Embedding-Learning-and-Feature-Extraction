@@ -55,7 +55,7 @@ class ContentBasedLearn2RankNetwork_Base:
             return last_output
 
 class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
-    def __init__(self, pretrained_embedding_dim, user_layer_units, item_layer_units,
+    def __init__(self, pretrained_embedding_dim, user_layer_units, item_layer_units, weight_decay,
                  profile_pooling_mode='AVG'):
         
         assert user_layer_units[-1] == item_layer_units[-1]
@@ -121,13 +121,21 @@ class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
         self._negative_item_vector = self.compute_item_embedding(tmp, item_layer_units)
         
         # --- train loss
+        
+        # ranking loss
         dot_pos = tf.reduce_sum(tf.multiply(self._user_vector, self._positive_item_vector), 1)
         dot_neg = tf.reduce_sum(tf.multiply(self._user_vector, self._negative_item_vector), 1)
         dot_delta = dot_pos - dot_neg
         ones = tf.fill(tf.shape(self._user_vector)[:1], 1.0)
-        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=dot_delta, labels=ones)
-        loss = tf.reduce_mean(loss, name='train_loss')
-        self._train_loss = loss
+        rank_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=dot_delta, labels=ones)
+        rank_loss = tf.reduce_mean(rank_loss, name='train_loss')
+        
+        # l2 loss
+        _vars = [v for v in tf.trainable_variables() if 'bias' not in v.name]        
+        l2_loss = tf.add_n([ tf.nn.l2_loss(v) for v in _vars ])
+        
+        # train loss
+        self._train_loss = rank_loss + weight_decay * l2_loss
         
         # --- test accuracy
         accuracy = tf.reduce_sum(tf.cast(dot_delta > .0, tf.float32), name = 'test_accuracy')
