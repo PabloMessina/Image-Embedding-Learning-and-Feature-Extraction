@@ -130,12 +130,16 @@ class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
         rank_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=dot_delta, labels=ones)
         rank_loss = tf.reduce_mean(rank_loss, name='train_loss')
         
-        # l2 loss
-        _vars = [v for v in tf.trainable_variables() if 'bias' not in v.name]        
-        l2_loss = tf.add_n([ tf.nn.l2_loss(v) for v in _vars ])
-        
-        # train loss
-        self._train_loss = rank_loss + weight_decay * l2_loss
+        if weight_decay > 0:
+            # l2 loss
+            _vars = [v for v in tf.trainable_variables() if 'bias' not in v.name]        
+            l2_loss = tf.add_n([ tf.nn.l2_loss(v) for v in _vars ])        
+            # train loss
+            self._train_loss = rank_loss + weight_decay * l2_loss
+        else:
+            assert weight_decay == 0
+            # train loss
+            self._train_loss = rank_loss
         
         # --- test accuracy
         accuracy = tf.reduce_sum(tf.cast(dot_delta > .0, tf.float32), name = 'test_accuracy')
@@ -248,7 +252,7 @@ class VBPR_Network_Base:
             return fc1
     
 class VBPR_Network_Train(VBPR_Network_Base):
-    def __init__(self, n_users, n_items, user_latent_dim, item_latent_dim, item_visual_dim, pretrained_dim=2048):
+    def __init__(self, n_users, n_items, user_latent_dim, item_latent_dim, item_visual_dim, pretrained_dim, weight_decay):
         
         assert (user_latent_dim == item_latent_dim + item_visual_dim)
         
@@ -320,11 +324,23 @@ class VBPR_Network_Train(VBPR_Network_Base):
         # ---- train-test tensors
         
         # -- train loss
+        
+        # ranking loss
         delta_score = self._pos_score - self._neg_score
         ones = tf.fill(tf.shape(self._user_latent_vector)[:1], 1.0)
-        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=delta_score, labels=ones)
-        loss = tf.reduce_mean(loss, name='train_loss')
-        self._train_loss = loss
+        rank_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=delta_score, labels=ones)
+        rank_loss = tf.reduce_mean(rank_loss, name='rank_loss')
+        
+        if weight_decay > 0:
+            # l2 loss
+            _vars = [v for v in tf.trainable_variables() if 'bias' not in v.name]        
+            l2_loss = tf.add_n([ tf.nn.l2_loss(v) for v in _vars ])        
+            # train loss
+            self._train_loss = rank_loss + weight_decay * l2_loss
+        else:
+            assert weight_decay == 0
+            # train loss
+            self._train_loss = rank_loss
         
         # -- test accuracy
         accuracy = tf.reduce_sum(tf.cast(delta_score > .0, tf.float32), name='test_accuracy')
