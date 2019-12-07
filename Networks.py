@@ -17,7 +17,7 @@ class TrainLogger:
                         n_train_tuples, n_validation_tuples, elapsed_seconds, batch_size, learning_rate,
                         model_updated))
 
-class ContentBasedLearn2RankNetwork_Base:        
+class CuratorNet_Base:        
     
     @staticmethod
     def compute_user_embedding(profile_aggregation_vector, user_layer_units):
@@ -54,7 +54,7 @@ class ContentBasedLearn2RankNetwork_Base:
                 )
             return last_output
 
-class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
+class CuratorNet_Train(CuratorNet_Base):
     def __init__(self, pretrained_embedding_dim, user_layer_units, item_layer_units, weight_decay,
                  profile_pooling_mode='AVG'):
         
@@ -174,7 +174,7 @@ class ContentBasedLearn2RankNetwork_Train(ContentBasedLearn2RankNetwork_Base):
             self._negative_item_index: negative_item_index,
         })
 
-class ContentBasedLearn2RankNetwork_Precomputation(ContentBasedLearn2RankNetwork_Base):
+class CuratorNet_Precomputation(CuratorNet_Base):
     def __init__(self, pretrained_embedding_dim, item_layer_units):        
         
         # --- placeholders
@@ -188,7 +188,7 @@ class ContentBasedLearn2RankNetwork_Precomputation(ContentBasedLearn2RankNetwork
             self._pretrained_embeddings: pretrained_embeddings,
         })
 
-class ContentBasedLearn2RankNetwork_Evaluation(ContentBasedLearn2RankNetwork_Base):
+class CuratorNet_Evaluation(CuratorNet_Base):
     def __init__(self, user_layer_units, latent_space_dim, profile_pooling_mode='AVG'):
         
         assert user_layer_units[-1] == latent_space_dim

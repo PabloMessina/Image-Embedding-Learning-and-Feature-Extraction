@@ -2,3 +2,5 @@
 __pycache__/
 data/
 testing_debugging.ipynb
+__config.json
+
