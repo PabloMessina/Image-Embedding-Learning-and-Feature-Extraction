@@ -24,3 +24,14 @@ def read_numpy_features_matrix(dirpath, feat_filename, ids_filename):
         index2id=index2id,
         id2index=id2index,
     )
+
+def numpy_array_feature_matrix(feature_matrix, feature_id2index, artworks):
+    first = True
+    for artwork in artworks:
+        i = feature_id2index[artwork.id]
+        feat_vec = feature_matrix[i]
+        if first:
+            output_matrix = np.empty((len(artworks), len(feat_vec)))
+            first = False
+        output_matrix[artwork.index] = feat_vec
+    return output_matrix

@@ -1,3 +1,52 @@
+import numpy as np
+import heapq
+
+NUMPY_FLOAT64_MIN = np.finfo(np.float64).min
+
+def avgsimtopk(art, arts, sim, k):
+    n = len(arts)
+    if n <= k:
+        return sum(sim(art, a) for a in arts) / n
+    else:
+        h = []
+        totsim = 0
+        for a in arts:
+            s = sim(art, a)
+            totsim += s
+            if len(h) < k:
+                heapq.heappush(h, s)
+            else:
+                totsim -= heapq.heappushpop(h, s)
+        return totsim / k
+
+def avg_similarity(art, arts, sim):
+    totsim = 0
+    for a in arts:
+        totsim += sim(art, a)
+    return totsim / len(arts)
+
+def max_similarity(art, arts, sim):
+    maxsim = NUMPY_FLOAT64_MIN
+    for a in arts:
+        maxsim = max(maxsim, sim(art, a))
+    return maxsim
+
+def append_avgsimtopk(simfuncs, pairwise_simfunc, k):
+    simfuncs.append(lambda art, arts: avgsimtopk(art, arts, pairwise_simfunc, k))
+
+def append_simfunc_and_tags(profile_simfuncs, simfunc_tags, pairwise_simfunc, tag, ks):
+    for k in ks:
+        if k is None:
+            profile_simfuncs.append(lambda art, arts: avg_similarity(art, arts, pairwise_simfunc))
+            simfunc_tags.append('{}-avgsim'.format(tag))
+        elif k == 1:
+            profile_simfuncs.append(lambda art, arts: max_similarity(art, arts, pairwise_simfunc))
+            simfunc_tags.append('{}-maxsim'.format(tag))
+        else:
+            append_avgsimtopk(profile_simfuncs, pairwise_simfunc, k)
+            simfunc_tags.append('{}-avgsmtp{}'.format(tag, k))
+
+
 def sanity_check_purchase_upload_events(events, artworks_dict):
     # test event types
     purchase_count = 0

@@ -1,3 +1,5 @@
+from collections import deque
+
 class Artwork:
     def __init__(self, id_, upload_date, original, **kwargs):
         self.id = id_
